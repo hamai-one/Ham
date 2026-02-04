@@ -11,7 +11,8 @@ export enum NavPage {
   ASSETS = 'assets',
   SETTINGS = 'settings',
   DEPLOY_PANEL = 'deploy_panel',
-  DATABASE_USER = 'database_user'
+  DATABASE_USER = 'database_user',
+  HISTORY = 'history'
 }
 
 export enum MarketCategory {
@@ -60,116 +61,48 @@ export interface ServerStatus {
   location: string;
   cpuUsage: number;
   ramUsage: number;
-  heartbeat: 'STABLE' | 'RHYTHMIC' | 'STRESS';
+  heartbeat: 'STABLE' | 'LATENCY_SPIKE' | 'OFFLINE';
   activeInstances: CloudInstance[];
 }
 
-export interface RiskConfig {
-  riskPerTrade: number;
-  stopLoss: number;
-  takeProfit: number;
-  maxDrawdown: number;
-  maxDailyLoss: number;
-}
-
-export interface Currency {
-  code: string;
-  name: string;
-  symbol: string;
-  rate: number; 
+export interface BalanceSnapshot {
+  before: number;
+  after: number;
 }
 
 export interface Transaction {
   id: string;
-  type: 'BUY' | 'SELL' | 'AUTO_BUY' | 'AUTO_SELL';
+  type: 'BUY' | 'SELL' | 'AUTO_BUY' | 'AUTO_SELL' | 'CLOSED_TP' | 'CLOSED_SL' | 'CLOSED_MANUAL';
   asset: string;
+  source: TradingSource;
   category: MarketCategory;
   amount: number;
   price: number;
   leverage: number;
-  status: 'OPEN' | 'COMPLETED' | 'FAILED' | 'CLOSED_SL' | 'CLOSED_TP' | 'CLOSED_MANUAL';
+  status: 'OPEN' | 'CLOSED_TP' | 'CLOSED_SL' | 'CLOSED_MANUAL';
   timestamp: Date;
-  reasoning?: string;
+  closePrice?: number;
+  closeTimestamp?: Date;
   pnl?: number;
+  fee?: number;
+  balanceSnapshot?: BalanceSnapshot;
+  initialMargin?: number; // Added for accurate balance restoration
 }
 
 export interface NeuralEvent {
   id: string;
   message: string;
-  type: 'AI_THINKING' | 'EXECUTION' | 'SYSTEM' | 'MARKET_ALERT';
+  type: 'EXECUTION' | 'ANALYSIS' | 'SYSTEM' | 'MARKET_ALERT';
   timestamp: Date;
-  isCloud?: boolean;
-}
-
-export interface SystemHealth {
-  cpu: number;
-  latency: number;
-  aiEfficiency: number;
-  nodeStatus: 'STABLE' | 'DEGRADED' | 'SYNCING';
-  groqStatus: 'ONLINE' | 'LIMITED' | 'OFFLINE';
-}
-
-export interface LicenseUser {
-  id: string;
-  name: string;
-  keylis: string;
-  licenseKey: string;
-  startDate: string;
-  duration: '1' | '7' | '30' | 'UNLIMITED';
-  expiryDate: string | 'UNLIMITED';
-  isActive: boolean;
-  authority: 'ADMIN' | 'USER';
-}
-
-export interface TradeSignal {
-  action: string;
-  entry: string;
-  stopLoss: string;
-  takeProfit: string;
-  reasoning: string;
-  confidence: number;
-  timeframeConfluence: {
-    m15: string;
-    h1: string;
-    h4: string;
-    d1: string;
-  };
-  indicators: {
-    rsi: number;
-    macd: string;
-    volatility: string;
-    trend: string;
-    marketStructure: string;
-    liquidityZones: string[];
-    institutionalFootprint: string;
-  };
-}
-
-export interface BrokerKeys {
-  metaApiToken: string;
-  accountId: string;
-  isAuthorized: boolean;
 }
 
 export interface AppState {
   balances: Record<TradingSource, number> & { simulation: number; real: number };
+  allocatedBalances: Record<TradingSource, number | null>;
   activeSource: TradingSource;
-  nodeKeys: {
-    binance: { apiKey: string; secretKey: string; isAuthorized: boolean };
-    bybit: { apiKey: string; secretKey: string };
-    telegram: { token: string };
+  nodeKeys: Record<TradingSource, any> & {
+    telegram: { token: string; chatId?: string };
     groq: { apiKey: string };
-    // Multi-Broker Keys
-    fbs: BrokerKeys;
-    exness: BrokerKeys;
-    xm: BrokerKeys;
-    ic_markets: BrokerKeys;
-    hfm: BrokerKeys;
-    pepperstone: BrokerKeys;
-    ig_group: BrokerKeys;
-    plus500: BrokerKeys;
-    octafx: BrokerKeys;
-    ibkr: BrokerKeys;
   };
   transactions: Transaction[];
   neuralEvents: NeuralEvent[];
@@ -183,25 +116,49 @@ export interface AppState {
   executionType: ExecutionType;
   activeStrategy: StrategyType;
   activeBrain: NeuralBrain;
-  health: SystemHealth;
+  health: { cpu: number; latency: number; aiEfficiency: number; nodeStatus: string; groqStatus: string };
   serverStatus: ServerStatus;
   notificationsEnabled: boolean;
   soundEnabled: boolean;
   licenseDatabase: LicenseUser[];
   isLicenseVerified: boolean;
-  verifiedLicenseKey?: string;
+  verifiedLicenseKey: string;
   currentUserAuthority?: 'ADMIN' | 'USER';
-  masterNodeSignature?: string;
   thinkingBudget: number;
   aiTemperature: number;
-  riskParameters: RiskConfig;
+  riskParameters: {
+    riskPerTrade: number;
+    stopLoss: number;
+    takeProfit: number;
+    maxDrawdown: number;
+    maxDailyLoss: number;
+  };
+}
+
+export interface Currency {
+  code: string;
+  name: string;
+  symbol: string;
+  rate: number;
+}
+
+export interface LicenseUser {
+  id: string;
+  name: string;
+  keylis: string;
+  licenseKey: string;
+  startDate: string;
+  duration: string; 
+  expiryDate: string;
+  isActive: boolean;
+  authority: 'ADMIN' | 'USER';
 }
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
-  thought?: string; 
+  thought?: string;
   timestamp: Date;
 }
 
@@ -210,4 +167,15 @@ export interface MediaItem {
   url: string;
   prompt: string;
   timestamp: Date;
+}
+
+export interface TradeSignal {
+  symbol: string;
+  action: 'BUY' | 'SELL' | 'HOLD';
+  entry: number;
+  tp: number;
+  sl: number;
+  confidence: number;
+  reason: string;
+  timeframe: string;
 }
