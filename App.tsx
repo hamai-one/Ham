@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import LandingScreen from './components/LandingScreen.tsx';
 import Sidebar from './components/Sidebar.tsx';
@@ -15,17 +14,17 @@ import Assets from './components/Assets.tsx';
 import Settings from './components/Settings.tsx';
 import MarketIntel from './components/MarketIntel.tsx';
 import StrategyBuilder from './components/StrategyBuilder.tsx';
-import { NavPage, Transaction, AppState, MarketCategory, NeuralBrain, TradingMode, ExecutionType, ServerStatus, NeuralEvent, TradingSource, Currency, AppLanguage } from './types.ts';
+import History from './components/History.tsx';
+import { NavPage, Transaction, AppState, MarketCategory, NeuralBrain, TradingMode, ExecutionType, ServerStatus, NeuralEvent, TradingSource, Currency, AppLanguage, LicenseUser } from './types.ts';
 import { 
   BINANCE_KEY as DEFAULT_BINANCE_KEY,
   BINANCE_SECRET as DEFAULT_BINANCE_SECRET,
-  BYBIT_KEY as DEFAULT_BYBIT_KEY,
-  BYBIT_SECRET as DEFAULT_BYBIT_SECRET,
   TELEGRAM_BOT_TOKEN as DEFAULT_TG_TOKEN,
   GROQ_API_KEY as DEFAULT_GROQ_KEY,
   SCAN_SYMBOLS
 } from './constants.tsx';
 import { BinanceService } from './services/binanceService.ts';
+import { FirebaseService } from './services/firebase.ts';
 
 const GLOBAL_CURRENCIES: Currency[] = [
   { code: 'USD', name: 'United States Dollar', symbol: '$', rate: 1 },
@@ -69,27 +68,47 @@ const DEFAULT_SERVER_STATUS: ServerStatus = {
   location: 'Singapore Central', cpuUsage: 14.2, ramUsage: 22.5, heartbeat: 'STABLE', activeInstances: []
 };
 
+// HELPER: Dynamic Contract Size untuk Normalisasi PnL
+export const getContractSize = (asset: string) => {
+  if (asset.includes('XAU') || asset.includes('GOLD')) return 100; // Gold Standard 100oz
+  if (asset.includes('US30') || asset.includes('DJI') || asset.includes('NAS')) return 1; // Indices CFD
+  if (asset.includes('JPY')) return 100000; // JPY Pairs
+  if (asset.includes('BTC') || asset.includes('ETH')) return 1; // Crypto Spot/Futures often 1
+  return 100000; // Standard Forex Lot
+};
+
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showLicensePortal, setShowLicensePortal] = useState(false);
   const [currentPage, setCurrentPage] = useState<NavPage>(NavPage.DASHBOARD);
-  // Current Price State untuk PnL Realtime
   const [currentPrice, setCurrentPrice] = useState<number>(0); 
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [scanningAsset, setScanningAsset] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'IDLE' | 'SYNCING'>('IDLE');
   
   const [state, setState] = useState<AppState>(() => {
+    // Generate dates for the new user license
+    const today = new Date();
+    const expiryDate = new Date();
+    expiryDate.setDate(today.getDate() + 7);
+
     const dbk = { metaApiToken: '', accountId: '', isAuthorized: false };
     const defaultState: AppState = {
+      // SINKRONISASI SALDO: Setiap broker memiliki vault sendiri.
       balances: { 
-        simulation: 100000.00, real: 0.00, fbs: 0, exness: 0, xm: 0, ic_markets: 0, hfm: 0, 
+        simulation: 10000.00, real: 0.00, fbs: 0, exness: 0, xm: 0, ic_markets: 0, hfm: 0, 
         pepperstone: 0, ig_group: 0, plus500: 0, octafx: 0, ibkr: 0, binance: 0 
+      },
+      // Saldo Alokasi (Partial Capital) - Null berarti menggunakan full balance
+      allocatedBalances: {
+        binance: null, fbs: null, exness: null, xm: null, ic_markets: null, hfm: null,
+        pepperstone: null, ig_group: null, plus500: null, octafx: null, ibkr: null
       },
       activeSource: 'binance',
       nodeKeys: {
         binance: { apiKey: DEFAULT_BINANCE_KEY, secretKey: DEFAULT_BINANCE_SECRET, isAuthorized: false },
-        bybit: { apiKey: DEFAULT_BYBIT_KEY, secretKey: DEFAULT_BYBIT_SECRET },
         telegram: { token: DEFAULT_TG_TOKEN },
         groq: { apiKey: DEFAULT_GROQ_KEY },
         fbs: { ...dbk }, exness: { ...dbk }, xm: { ...dbk }, ic_markets: { ...dbk }, hfm: { ...dbk },
@@ -101,8 +120,21 @@ const App: React.FC = () => {
       activeStrategy: 'NEURAL_AGGRESSIVE', activeBrain: 'DEEPSEEK_R1',
       health: { cpu: 12, latency: 12, aiEfficiency: 99.9, nodeStatus: 'STABLE', groqStatus: 'ONLINE' },
       serverStatus: DEFAULT_SERVER_STATUS, notificationsEnabled: true, soundEnabled: true,
-      licenseDatabase: [{ id: 'ADM', name: 'Admin Central', keylis: 'dasopano21', licenseKey: 'dasopano21', startDate: '2025-01-01', duration: 'UNLIMITED', expiryDate: 'UNLIMITED', isActive: true, authority: 'ADMIN' }],
-      isLicenseVerified: false, thinkingBudget: 32768, aiTemperature: 0.7,
+      licenseDatabase: [
+        { id: 'ADM', name: 'Admin Central', keylis: 'dasopano21', licenseKey: 'dasopano21', startDate: '2025-01-01', duration: 'UNLIMITED', expiryDate: 'UNLIMITED', isActive: true, authority: 'ADMIN' },
+        { 
+          id: 'USR-AUTO-01', 
+          name: 'Registered User', 
+          keylis: 'Encrypted', 
+          licenseKey: 'U2FsdGVkX1+e+99hod9cfdrSfVCibGhuoUg8zM6pjBo=', 
+          startDate: today.toISOString().split('T')[0], 
+          duration: '7', 
+          expiryDate: expiryDate.toISOString().split('T')[0], 
+          isActive: true, 
+          authority: 'USER' 
+        }
+      ],
+      isLicenseVerified: false, verifiedLicenseKey: '', currentUserAuthority: undefined, thinkingBudget: 32768, aiTemperature: 0.7,
       riskParameters: { riskPerTrade: 1.5, stopLoss: 2.0, takeProfit: 5.0, maxDrawdown: 10.0, maxDailyLoss: 5.0 }
     };
 
@@ -113,6 +145,7 @@ const App: React.FC = () => {
         return { 
           ...defaultState, 
           ...parsed,
+          allocatedBalances: { ...defaultState.allocatedBalances, ...(parsed.allocatedBalances || {}) }, // Merge allocated defaults
           transactions: (parsed.transactions || []).map((t: any) => ({ ...t, timestamp: new Date(t.timestamp) })),
           neuralEvents: (parsed.neuralEvents || []).map((e: any) => ({ ...e, timestamp: new Date(e.timestamp) }))
         };
@@ -122,6 +155,31 @@ const App: React.FC = () => {
       return defaultState;
     }
   });
+
+  // --- FIREBASE REAL-TIME LISTENER ---
+  useEffect(() => {
+    // Subscribe ke Firebase Firestore
+    const unsubscribe = FirebaseService.subscribeToLicenses((updatedUsers) => {
+      setState(prev => {
+         return { ...prev, licenseDatabase: updatedUsers };
+      });
+      localStorage.setItem('AETERNA_GLOBAL_SYNC_DB', JSON.stringify(updatedUsers));
+    });
+
+    // Handle Resize untuk Mobile
+    const handleResize = () => {
+        const mobile = window.innerWidth < 1024;
+        setIsMobile(mobile);
+        if (mobile) setIsSidebarOpen(false);
+        else setIsSidebarOpen(true);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+        unsubscribe();
+        window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
   const addNeuralEvent = useCallback((message: string, type: NeuralEvent['type']) => {
     const event: NeuralEvent = { id: Date.now().toString(), message, type, timestamp: new Date() };
@@ -140,144 +198,373 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [state.isLicenseVerified]);
 
-  // --- TRADING LOGIC IMPLEMENTATION ---
+  // --- REAL-TIME BALANCE SYNC ENGINE ---
+  const syncRealBalance = async (forceSource?: TradingSource) => {
+      const source = forceSource || state.activeSource;
+      setSyncStatus('SYNCING');
+      
+      const binanceService = new BinanceService(
+          state.nodeKeys.binance.apiKey, 
+          state.nodeKeys.binance.secretKey
+      );
 
-  // Handle Reset Simulation
+      const brokerKeys = (state.nodeKeys as any)[source];
+      
+      try {
+          const fetchedBalance = await binanceService.getUnifiedBalance(source, brokerKeys);
+          
+          setState(prev => {
+              const newBalances = { ...prev.balances };
+              if (source === 'binance') {
+                  if (fetchedBalance > 0) newBalances.real = fetchedBalance;
+              } else {
+                  if (fetchedBalance === -1) {
+                      const current = (newBalances as any)[source] || 0;
+                      if (current === 0) (newBalances as any)[source] = 5000.00; 
+                  } else if (fetchedBalance > 0) {
+                      (newBalances as any)[source] = fetchedBalance;
+                  }
+              }
+              return { ...prev, balances: newBalances };
+          });
+          
+          if (fetchedBalance !== 0) {
+             addNeuralEvent(`Vault Update: ${source.toUpperCase()} Balance Synced.`, 'SYSTEM');
+          }
+      } catch (e) {
+          console.error("Sync Error", e);
+      } finally {
+          setTimeout(() => setSyncStatus('IDLE'), 1500);
+      }
+  };
+
+  const handleSetAllocation = (amount: number | null) => {
+      setState(prev => ({
+          ...prev,
+          allocatedBalances: {
+              ...prev.allocatedBalances,
+              [prev.activeSource]: amount
+          }
+      }));
+      addNeuralEvent(`Capital Allocation Updated: ${amount ? '$'+amount : 'Full Balance'}`, 'SYSTEM');
+  };
+
   const handleResetSimulation = () => {
     setState(prev => ({
       ...prev,
-      balances: { ...prev.balances, simulation: 10000.00 } // Reset ke 10,000 USDT
+      balances: { ...prev.balances, simulation: 10000.00 }
     }));
     addNeuralEvent("Simulation Balance Reset to default.", "SYSTEM");
   };
 
-  // 1. Handle Trade (Open Position)
-  const handleTrade = (amount: number, type: 'BUY' | 'SELL') => {
-    // Tentukan Wallet Mana yang Dipakai
-    let activeWalletKey = state.tradingMode === 'simulation' ? 'simulation' : (state.activeSource === 'binance' ? 'real' : state.activeSource);
+  // UPDATE: Async to support fetching real price for assetOverride (AutoPilot)
+  // This prevents the "Wrong Price -> Massive Margin/PnL" bug
+  const handleTrade = async (amount: number, type: 'BUY' | 'SELL', assetOverride?: string) => {
+    const isReal = state.tradingMode === 'real';
+    const activeWalletKey = isReal ? (state.activeSource === 'binance' ? 'real' : state.activeSource) : 'simulation';
     
-    // @ts-ignore
-    const currentBalance = activeWalletKey === 'real' || activeWalletKey === 'simulation' ? state.balances[activeWalletKey] : state.balances[activeWalletKey];
+    // Determine the effective balance (Total or Allocated)
+    let currentBalance = 0;
+    
+    if (isReal) {
+        // Jika Allocated Balance diset, gunakan itu. Jika tidak, gunakan saldo total.
+        const allocated = state.allocatedBalances[state.activeSource];
+        // @ts-ignore
+        const total = activeWalletKey === 'real' ? state.balances.real : state.balances[activeWalletKey];
+        currentBalance = allocated !== null ? allocated : total;
+    } else {
+        currentBalance = state.balances.simulation;
+    }
 
-    if (currentBalance < amount) {
-       addNeuralEvent(`Insufficient Funds in ${activeWalletKey.toUpperCase()} Wallet`, 'SYSTEM');
+    // Use Asset Override if provided (for AutoPilot), otherwise current UI asset
+    const tradeAsset = assetOverride || state.activeAssetId;
+    
+    // CRITICAL FIX: Fetch correct price for override asset
+    let executionPrice = currentPrice;
+    if (assetOverride && assetOverride !== state.activeAssetId) {
+        // If trading an asset not currently viewed, we MUST fetch its price
+        // to avoid using the viewed asset's price (e.g. BTC price for EUR trade)
+        const svc = new BinanceService(state.nodeKeys.binance.apiKey, state.nodeKeys.binance.secretKey);
+        try {
+            executionPrice = await svc.getTickerPrice(tradeAsset, state.activeSource);
+        } catch(e) {
+            console.error("Price fetch failed for override", e);
+            // Fallback to avoid division by zero or NaN, but this trade is risky
+            return;
+        }
+    }
+    
+    if (!executionPrice || executionPrice <= 0) executionPrice = 1; // Safety
+
+    // 1. Margin Calculation (CORRECTED FORMULA)
+    let marginRequired = amount;
+    if (state.activeSource !== 'binance') {
+        const contractSize = getContractSize(tradeAsset);
+        // Correct Forex/Indices Margin: (Lots * ContractSize * Price) / Leverage
+        // This fixes the "Billions" error where margin was underestimated.
+        marginRequired = (amount * contractSize * executionPrice) / state.leverage; 
+    }
+
+    // 2. Fee Calculation (Simulasi 0.1% dari Margin)
+    const estimatedFee = marginRequired * 0.001; 
+    const totalDeduction = marginRequired + estimatedFee;
+
+    if (currentBalance < totalDeduction) {
+       addNeuralEvent(`Insufficient Funds in ${isReal ? (state.allocatedBalances[state.activeSource] !== null ? 'Allocated' : 'Main') : 'Demo'} Wallet. Need ${totalDeduction.toFixed(2)}`, 'SYSTEM');
        return;
     }
 
-    // Kurangi Saldo
-    const newBalances = { ...state.balances };
-    // @ts-ignore
-    if (activeWalletKey === 'real' || activeWalletKey === 'simulation') newBalances[activeWalletKey] -= amount;
-    else (newBalances as any)[activeWalletKey] -= amount;
+    // Apply state updates based on calculated margin
+    setState(prev => {
+        const newBalances = { ...prev.balances };
+        const newAllocated = { ...prev.allocatedBalances };
+        
+        // 3. Deduct Margin + Fee from TOTAL Ledger
+        if (activeWalletKey === 'real' || activeWalletKey === 'simulation') {
+            // @ts-ignore
+            newBalances[activeWalletKey] -= totalDeduction; 
+        } else {
+            (newBalances as any)[activeWalletKey] -= totalDeduction;
+        }
 
-    // Buat Transaksi Baru
-    const newTx: Transaction = {
-      id: Date.now().toString(),
-      type: state.executionType === 'autopilot' ? (type === 'BUY' ? 'AUTO_BUY' : 'AUTO_SELL') : type,
-      asset: state.activeAssetId,
-      category: state.activeCategory,
-      amount: amount,
-      price: currentPrice || 0, // Harga saat entry
-      leverage: state.leverage,
-      status: 'OPEN',
-      timestamp: new Date(),
-      pnl: 0
-    };
+        // 4. Deduct from ALLOCATED Ledger (If active)
+        if (isReal && newAllocated[state.activeSource] !== null) {
+            // @ts-ignore
+            newAllocated[state.activeSource] -= totalDeduction;
+        }
 
-    setState(prev => ({
-      ...prev,
-      balances: newBalances,
-      transactions: [newTx, ...prev.transactions]
-    }));
+        // Capture Balance After Deduction for Snapshot
+        const balanceAfter = isReal && newAllocated[state.activeSource] !== null 
+            ? newAllocated[state.activeSource]!
+            // @ts-ignore
+            : (activeWalletKey === 'real' || activeWalletKey === 'simulation' ? newBalances[activeWalletKey] : newBalances[activeWalletKey]);
 
-    addNeuralEvent(`Position Opened: ${type} ${state.activeAssetId} @ $${currentPrice?.toFixed(2)}`, 'EXECUTION');
+        const newTx: Transaction = {
+          id: Date.now().toString(),
+          type: state.executionType === 'autopilot' ? (type === 'BUY' ? 'AUTO_BUY' : 'AUTO_SELL') : type,
+          asset: tradeAsset,
+          source: state.activeSource, 
+          category: state.activeCategory,
+          amount: amount, 
+          price: executionPrice,
+          leverage: state.leverage,
+          status: 'OPEN',
+          timestamp: new Date(),
+          pnl: 0,
+          fee: estimatedFee,
+          initialMargin: marginRequired, // Stored for accurate restoration
+          balanceSnapshot: {
+              before: currentBalance,
+              after: balanceAfter
+          }
+        };
+
+        return {
+          ...prev,
+          balances: newBalances,
+          allocatedBalances: newAllocated,
+          transactions: [newTx, ...prev.transactions]
+        };
+    });
+
+    addNeuralEvent(`Position Opened: ${type} ${tradeAsset} @ ${amount}`, 'EXECUTION');
   };
 
-  // 2. Handle Close Position (Realize PnL)
-  // Perlu menerima harga saat ini dari Terminal agar akurat
-  const handleClosePosition = (txId: string, closingPrice: number) => {
+  const handleClosePosition = async (txId: string) => {
     const txIndex = state.transactions.findIndex(t => t.id === txId);
     if (txIndex === -1) return;
 
     const tx = state.transactions[txIndex];
     if (tx.status !== 'OPEN') return;
 
-    // Hitung PnL
-    // (Harga Close - Harga Entry) / Harga Entry * Leverage * Margin
-    const diff = closingPrice - tx.price;
-    const rawPnl = (tx.type.includes('BUY') ? diff : -diff) / tx.price * tx.amount * tx.leverage;
-    
-    // Kembalikan Margin + PnL ke Saldo
-    const finalAmount = tx.amount + rawPnl;
-    
-    let activeWalletKey = state.tradingMode === 'simulation' ? 'simulation' : (state.activeSource === 'binance' ? 'real' : state.activeSource);
-    const newBalances = { ...state.balances };
-    
-    // @ts-ignore
-    if (activeWalletKey === 'real' || activeWalletKey === 'simulation') newBalances[activeWalletKey] += finalAmount;
-    else (newBalances as any)[activeWalletKey] += finalAmount;
+    const binanceService = new BinanceService('', '');
+    const closingPrice = await binanceService.getTickerPrice(tx.asset, tx.source);
 
-    // Update Transaksi
-    const updatedTx = { ...tx, status: 'CLOSED_MANUAL', pnl: rawPnl, timestamp: new Date() }; // Update timestamp close if needed
+    const diff = closingPrice - tx.price;
+    let rawPnl = 0;
+    
+    if (state.activeSource === 'binance') {
+         // Crypto PnL
+         const direction = tx.type.includes('BUY') ? 1 : -1;
+         rawPnl = ((diff / tx.price) * direction * tx.amount * tx.leverage);
+    } else {
+         // Forex/Metals PnL (NORMALIZED)
+         const contractSize = getContractSize(tx.asset);
+         const direction = tx.type.includes('BUY') ? 1 : -1;
+         
+         // PnL = PriceDiff * ContractSize * Lots
+         rawPnl = (diff * direction) * contractSize * tx.amount;
+         
+         // JPY Correction (Price diff is in JPY, must convert to USD approx /100 or /Rate)
+         if (tx.asset.includes('JPY')) rawPnl /= 100;
+    }
+    
+    // Return Margin (Closed Position) - Use stored initialMargin if available, else recalculate
+    let marginUsed = tx.initialMargin || 0;
+    if (!marginUsed) {
+        // Fallback for old transactions
+        if (state.activeSource !== 'binance') {
+            const contractSize = getContractSize(tx.asset);
+            // We use closing price here as approximation if open price logic was flawed before
+            marginUsed = (tx.amount * contractSize * tx.price) / tx.leverage; 
+        } else {
+            marginUsed = tx.amount;
+        }
+    }
+
+    const finalReturn = marginUsed + rawPnl;
+    const isReal = state.tradingMode === 'real';
+    
+    let activeWalletKey = isReal ? (tx.source === 'binance' ? 'real' : tx.source) : 'simulation';
+    const newBalances = { ...state.balances };
+    const newAllocated = { ...state.allocatedBalances };
+    
+    // Update Total Balance
+    // @ts-ignore
+    if (activeWalletKey === 'real' || activeWalletKey === 'simulation') newBalances[activeWalletKey] += finalReturn;
+    else (newBalances as any)[activeWalletKey] += finalReturn;
+
+    // Update Allocated Balance (If active and matched source)
+    if (isReal && newAllocated[tx.source] !== null) {
+        // @ts-ignore
+        newAllocated[tx.source] += finalReturn;
+    }
+
+    // Balance After Return (Final Snapshot)
+    const balanceAfterClose = isReal && newAllocated[tx.source] !== null
+        ? newAllocated[tx.source]!
+        // @ts-ignore
+        : (activeWalletKey === 'real' || activeWalletKey === 'simulation' ? newBalances[activeWalletKey] : newBalances[activeWalletKey]);
+
+    const updatedTx: Transaction = { 
+        ...tx, 
+        status: rawPnl >= 0 ? 'CLOSED_TP' : 'CLOSED_SL', 
+        pnl: rawPnl, 
+        closePrice: closingPrice,
+        closeTimestamp: new Date(),
+        // Update snapshot to reflect final state
+        balanceSnapshot: {
+            before: tx.balanceSnapshot?.before || 0, // Keep original entry balance
+            after: balanceAfterClose // New final balance
+        }
+    };
+    
     const newTransactions = [...state.transactions];
-    newTransactions[txIndex] = updatedTx as Transaction;
+    newTransactions[txIndex] = updatedTx;
 
     setState(prev => ({
       ...prev,
       balances: newBalances,
+      allocatedBalances: newAllocated,
       transactions: newTransactions
     }));
 
     addNeuralEvent(`Position Closed: ${tx.asset} | PnL: ${rawPnl.toFixed(2)}`, rawPnl > 0 ? 'EXECUTION' : 'MARKET_ALERT');
   };
 
-  // 3. Kill Switch (Panic Button)
-  const handleKillSwitch = () => {
-    const openTxs = state.transactions.filter(t => t.status === 'OPEN');
+  const handleKillSwitch = async () => {
+    const openTxs = state.transactions.filter(t => t.status === 'OPEN' && t.source === state.activeSource);
     if (openTxs.length === 0) return;
 
-    let totalRefund = 0;
+    let totalReturn = 0;
     const newTransactions = [...state.transactions];
+    const binanceService = new BinanceService('', '');
 
-    openTxs.forEach(tx => {
-       // Close paksa dengan harga sekarang (currentPrice state global atau fetch latest)
-       // Kita gunakan currentPrice state app yg diupdate oleh Terminal
-       const diff = (currentPrice || tx.price) - tx.price;
-       const rawPnl = (tx.type.includes('BUY') ? diff : -diff) / tx.price * tx.amount * tx.leverage;
-       totalRefund += (tx.amount + rawPnl);
+    await Promise.all(openTxs.map(async (tx) => {
+       const closingPrice = await binanceService.getTickerPrice(tx.asset, tx.source);
+       const diff = closingPrice - tx.price;
+       
+       let rawPnl = 0;
+       if (state.activeSource === 'binance') {
+           const direction = tx.type.includes('BUY') ? 1 : -1;
+           rawPnl = ((diff / tx.price) * direction * tx.amount * tx.leverage);
+       } else {
+           const contractSize = getContractSize(tx.asset);
+           const direction = tx.type.includes('BUY') ? 1 : -1;
+           rawPnl = (diff * direction) * contractSize * tx.amount;
+           if (tx.asset.includes('JPY')) rawPnl /= 100;
+       }
+
+       let marginUsed = tx.initialMargin || 0;
+       if (!marginUsed) {
+           if (state.activeSource !== 'binance') {
+              const contractSize = getContractSize(tx.asset);
+              marginUsed = (tx.amount * contractSize * tx.price) / tx.leverage;
+           } else {
+              marginUsed = tx.amount;
+           }
+       }
+
+       totalReturn += (marginUsed + rawPnl);
        
        const idx = newTransactions.findIndex(t => t.id === tx.id);
        if (idx !== -1) {
-          newTransactions[idx] = { ...newTransactions[idx], status: 'CLOSED_MANUAL', pnl: rawPnl };
+          newTransactions[idx] = { 
+              ...newTransactions[idx], 
+              status: 'CLOSED_MANUAL', 
+              pnl: rawPnl,
+              closePrice: closingPrice,
+              closeTimestamp: new Date()
+          };
        }
-    });
+    }));
 
-    let activeWalletKey = state.tradingMode === 'simulation' ? 'simulation' : (state.activeSource === 'binance' ? 'real' : state.activeSource);
+    const isReal = state.tradingMode === 'real';
+    let activeWalletKey = isReal ? (state.activeSource === 'binance' ? 'real' : state.activeSource) : 'simulation';
     const newBalances = { ...state.balances };
+    const newAllocated = { ...state.allocatedBalances };
+
     // @ts-ignore
-    if (activeWalletKey === 'real' || activeWalletKey === 'simulation') newBalances[activeWalletKey] += totalRefund;
-    else (newBalances as any)[activeWalletKey] += totalRefund;
+    if (activeWalletKey === 'real' || activeWalletKey === 'simulation') newBalances[activeWalletKey] += totalReturn;
+    else (newBalances as any)[activeWalletKey] += totalReturn;
+
+    if (isReal && newAllocated[state.activeSource] !== null) {
+        // @ts-ignore
+        newAllocated[state.activeSource] += totalReturn;
+    }
+
+    const finalBalance = isReal && newAllocated[state.activeSource] !== null 
+        ? newAllocated[state.activeSource]!
+        : ((newBalances as any)[activeWalletKey] || (newBalances as any).simulation);
+    
+    newTransactions.forEach(t => {
+        if(t.status === 'CLOSED_MANUAL' && !t.balanceSnapshot?.after) {
+             t.balanceSnapshot = {
+                 before: t.balanceSnapshot?.before || 0,
+                 after: finalBalance 
+             }
+        }
+    });
 
     setState(prev => ({
        ...prev,
        balances: newBalances,
+       allocatedBalances: newAllocated,
        transactions: newTransactions
     }));
 
-    addNeuralEvent(`KILL SWITCH ACTIVATED: ${openTxs.length} Positions Liquidated`, 'SYSTEM');
+    addNeuralEvent(`KILL SWITCH ACTIVATED: ${openTxs.length} Positions Liquidated on ${state.activeSource.toUpperCase()}`, 'SYSTEM');
   };
 
 
   const handleNavigate = (page: NavPage, source?: TradingSource) => {
     setCurrentPage(page);
-    if (source) {
+    if (source && source !== state.activeSource) {
       const isCrypto = source === 'binance';
+      
       setState(p => ({ 
         ...p, 
         activeSource: source, 
         activeAssetId: isCrypto ? 'BTC' : 'EUR', 
-        activeCategory: isCrypto ? MarketCategory.crypto : MarketCategory.forex
+        activeCategory: isCrypto ? MarketCategory.crypto : MarketCategory.forex,
+        executionType: 'manual' 
       }));
+
+      syncRealBalance(source);
+    }
+    // Auto-close sidebar on mobile after navigation
+    if (isMobile) {
+      setIsSidebarOpen(false);
     }
   };
 
@@ -287,14 +574,16 @@ const App: React.FC = () => {
 
   const renderPage = () => {
     switch(currentPage) {
-      case NavPage.DASHBOARD: return <Dashboard state={state} />;
+      case NavPage.DASHBOARD: return <Dashboard key={state.activeSource} state={state} />;
       case NavPage.TERMINAL: return <Terminal 
+        key={state.activeSource}
         state={state} 
-        currentPrice={currentPrice} // Kirim harga ke terminal untuk visualisasi
+        currentPrice={currentPrice}
         onTrade={handleTrade}
-        onClosePosition={(id) => handleClosePosition(id, currentPrice)} // Gunakan harga saat ini untuk close
+        onClosePosition={handleClosePosition} 
         onKillSwitch={handleKillSwitch}
-        onResetSimulation={handleResetSimulation} // Pass reset function
+        onResetSimulation={handleResetSimulation}
+        onSetAllocation={handleSetAllocation}
         setActiveAsset={(cat, id) => setState(p => ({...p, activeCategory: cat, activeAssetId: id}))} 
         setTradingMode={(m) => setState(p => ({...p, tradingMode: m}))} 
         setExecutionType={(e) => setState(p => ({...p, executionType: e}))} 
@@ -302,27 +591,32 @@ const App: React.FC = () => {
         scanningAsset={scanningAsset}
         onUpdateLeverage={onUpdateLeverage}
         selectedCurrency={state.selectedCurrency}
-        // Callback khusus agar Terminal bisa update harga global App untuk sinkronisasi PnL
         // @ts-ignore
         onPriceUpdate={(price) => setCurrentPrice(price)}
       />;
-      case NavPage.JOURNAL: return <Journal state={state} />;
+      case NavPage.JOURNAL: return <Journal key={state.activeSource} state={state} />;
+      case NavPage.HISTORY: return <History key={state.activeSource} state={state} />;
       case NavPage.TRADING: return <TradingBot />;
       case NavPage.CREATIVE: return <CreativeLab />;
       case NavPage.ANALYSIS: return <Analysis />;
-      case NavPage.ASSETS: return <Assets balances={state.balances} activeSource={state.activeSource} selectedCurrency={state.selectedCurrency} isReal={state.tradingMode === 'real'} />;
+      case NavPage.ASSETS: return <Assets key={state.activeSource} balances={state.balances} activeSource={state.activeSource} selectedCurrency={state.selectedCurrency} isReal={state.tradingMode === 'real'} onRefresh={() => syncRealBalance()} />;
       case NavPage.SETTINGS: return <Settings state={state} onUpdateState={(u) => setState(p => ({...p, ...u}))} />;
       case NavPage.DEPLOY_PANEL: return <DeployPanel />;
       case NavPage.DATABASE_USER: return <DatabaseUser database={state.licenseDatabase} onUpdateDatabase={(d) => setState(p => ({...p, licenseDatabase: d}))} />;
       case NavPage.INTEL: return <MarketIntel />;
       case NavPage.ALGO_LAB: return <StrategyBuilder />;
-      default: return <Dashboard state={state} />;
+      default: return <Dashboard key={state.activeSource} state={state} />;
     }
   };
 
   return (
     <div className={`h-screen w-screen bg-[#020617] text-white selection:bg-emerald-500/30 overflow-hidden font-inter ${state.theme === 'light_aurora' ? 'brightness-125 saturate-150' : ''}`}>
       <LandingScreen />
+      
+      {syncStatus === 'SYNCING' && (
+          <div className="fixed top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent z-[100] animate-scan"></div>
+      )}
+
       {showLicensePortal && !loading && (
         <LicensePortal 
           database={state.licenseDatabase} 
@@ -334,6 +628,14 @@ const App: React.FC = () => {
       )}
       {!loading && !showLicensePortal && (
         <div className="flex relative h-full w-full overflow-hidden">
+          {/* Mobile Overlay Backdrop */}
+          {isMobile && isSidebarOpen && (
+              <div 
+                className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity"
+                onClick={() => setIsSidebarOpen(false)}
+              ></div>
+          )}
+
           <Sidebar 
             currentPage={currentPage} 
             activeSource={state.activeSource} 
@@ -343,20 +645,25 @@ const App: React.FC = () => {
             serverLinked={(state.nodeKeys as any)[state.activeSource]?.isAuthorized} 
             authority={state.currentUserAuthority} 
           />
-          <div className={`flex-1 flex flex-col transition-all duration-500 min-w-0 h-full relative ${isSidebarOpen ? 'pl-64' : 'pl-0'}`}>
-            <header className="h-20 glass border-b border-white/10 flex items-center justify-between px-8 shrink-0 z-40 bg-slate-950/80 relative">
-              <div className="flex items-center gap-5">
+          
+          {/* Main Content Area - Responsive Layout Fix: No padding on mobile when sidebar open */}
+          <div className={`flex-1 flex flex-col transition-all duration-500 min-w-0 h-full relative ${isSidebarOpen && !isMobile ? 'pl-64' : 'pl-0'}`}>
+            <header className="h-16 md:h-20 glass border-b border-white/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-30 bg-slate-950/80 relative">
+              <div className="flex items-center gap-3 md:gap-5">
                 <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-emerald-400 p-2 rounded-lg hover:bg-white/5 transition-all">
                   <i className="fa-solid fa-bars text-xl"></i>
                 </button>
-                <h1 className="text-2xl font-orbitron font-bold gradient-text tracking-widest hidden md:block">
-                  {currentPage.replace('_', ' ')}
-                </h1>
+                <div className="flex flex-col">
+                  <h1 className="text-lg md:text-2xl font-orbitron font-bold gradient-text tracking-widest block truncate max-w-[150px] md:max-w-none">
+                    {currentPage.replace('_', ' ')}
+                  </h1>
+                  {syncStatus === 'SYNCING' && (
+                     <span className="text-[8px] md:text-[9px] font-black text-emerald-500 uppercase tracking-widest animate-pulse">Syncing...</span>
+                  )}
+                </div>
               </div>
 
-              {/* TOP RIGHT SETTINGS BUTTON */}
-              <div className="flex items-center gap-4 relative">
-                  {/* Connection Status Indicator */}
+              <div className="flex items-center gap-2 md:gap-4 relative">
                   <div className="hidden md:flex flex-col items-end mr-2">
                     <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Brain Uplink</span>
                     <div className="flex items-center gap-2">
@@ -367,21 +674,19 @@ const App: React.FC = () => {
 
                   <button 
                     onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                    className={`w-10 h-10 rounded-xl bg-slate-900 border flex items-center justify-center text-slate-400 hover:text-emerald-400 transition-all shadow-lg ${isSettingsOpen ? 'border-emerald-500 text-emerald-400 shadow-emerald-500/20' : 'border-white/10'}`}
+                    className={`w-9 h-9 md:w-10 md:h-10 rounded-xl bg-slate-900 border flex items-center justify-center text-slate-400 hover:text-emerald-400 transition-all shadow-lg ${isSettingsOpen ? 'border-emerald-500 text-emerald-400 shadow-emerald-500/20' : 'border-white/10'}`}
                   >
-                    <i className="fa-solid fa-gear animate-spin-slow"></i>
+                    <i className="fa-solid fa-gear animate-spin-slow text-sm md:text-base"></i>
                   </button>
 
-                  {/* SETTINGS DROPDOWN */}
                   {isSettingsOpen && (
-                     <div className="absolute top-16 right-0 w-80 bg-[#020617] border border-white/10 rounded-2xl shadow-2xl p-0 z-50 animate-slideDown overflow-hidden">
+                     <div className="absolute top-14 md:top-16 right-0 w-72 md:w-80 bg-[#020617] border border-white/10 rounded-2xl shadow-2xl p-0 z-50 animate-slideDown overflow-hidden">
                         <div className="p-4 border-b border-white/5 bg-slate-900/50">
                            <h4 className="font-orbitron font-bold text-white text-sm uppercase tracking-widest">Node Settings</h4>
                            <p className="text-[9px] text-slate-500 font-black uppercase">Configuration Panel</p>
                         </div>
                         <div className="p-4 space-y-5 max-h-[70vh] overflow-y-auto custom-scrollbar">
                            
-                           {/* Theme */}
                            <div className="space-y-2">
                               <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Theme Mode</label>
                               <div className="flex bg-slate-900 p-1 rounded-xl border border-white/5">
@@ -390,7 +695,6 @@ const App: React.FC = () => {
                               </div>
                            </div>
 
-                           {/* AI Model */}
                            <div className="space-y-2">
                               <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">AI Neural Model</label>
                               <div className="flex bg-slate-900 p-1 rounded-xl border border-white/5">
@@ -399,7 +703,6 @@ const App: React.FC = () => {
                               </div>
                            </div>
 
-                           {/* Language */}
                            <div className="space-y-2">
                               <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Interface Language</label>
                               <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto custom-scrollbar p-1">
@@ -416,7 +719,6 @@ const App: React.FC = () => {
                               </div>
                            </div>
 
-                           {/* Currency */}
                            <div className="space-y-2">
                               <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Global Currency</label>
                               <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
@@ -446,7 +748,7 @@ const App: React.FC = () => {
 
             </header>
 
-            <main className="flex-1 overflow-y-auto overflow-x-hidden p-8 relative scroll-smooth custom-scrollbar">
+            <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 relative scroll-smooth custom-scrollbar">
                {renderPage()}
             </main>
           </div>
