@@ -1,0 +1,9 @@
+{
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "name": "Aeterna - Robot Trading AI",
+  "description": "Platform Robot Trading Cerdas dengan Visual 3D Elegan dan Konektivitas Binance Quantum."
+}
