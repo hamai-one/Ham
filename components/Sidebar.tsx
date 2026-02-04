@@ -29,6 +29,7 @@ const subMenus = [
   { id: NavPage.DASHBOARD, icon: 'fa-gauge-high', label: 'Master Node' },
   { id: NavPage.TERMINAL, icon: 'fa-chart-line', label: 'Trading Terminal' },
   { id: NavPage.TRADING, icon: 'fa-brain-circuit', label: 'Neural Bot' },
+  { id: NavPage.HISTORY, icon: 'fa-clock-rotate-left', label: 'History Log' },
   { id: NavPage.INTEL, icon: 'fa-shuttle-space', label: 'Market Intel' },
   { id: NavPage.ALGO_LAB, icon: 'fa-flask-vial', label: 'Strategy Lab' },
   { id: NavPage.JOURNAL, icon: 'fa-file-invoice-dollar', label: 'Journal' },
@@ -47,13 +48,22 @@ export const Sidebar: React.FC<SidebarProps> = (props) => {
     authority = 'USER'
   } = props;
 
+  // Initialize with the currently active source open
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ [activeSource]: true });
 
   const toggleGroup = (id: string) => {
     setOpenGroups(prev => {
-      const next = { ...prev };
-      next[id] = !prev[id];
-      return next;
+      // Accordion Logic: If clicking an already open group, toggle it off.
+      // If clicking a closed group, open it and close all others.
+      if (prev[id]) {
+          return { ...prev, [id]: false };
+      } else {
+          // Close all, open selected
+          const newState: Record<string, boolean> = {};
+          BROKERS.forEach(b => newState[b.id] = false);
+          newState[id] = true;
+          return newState;
+      }
     });
   };
 
@@ -92,16 +102,21 @@ export const Sidebar: React.FC<SidebarProps> = (props) => {
   };
 
   return (
-    <aside className={`w-64 h-screen glass border-r border-emerald-500/10 flex flex-col fixed left-0 top-0 z-50 transition-all duration-700 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-      <div className="p-8 relative">
+    <aside className={`w-64 h-screen glass border-r border-emerald-500/10 flex flex-col fixed left-0 top-0 z-50 transition-all duration-500 transform ${isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
+      <div className="p-8 relative flex items-center justify-between">
         <h1 className="text-xl font-orbitron font-bold gradient-text">AETERNA</h1>
-        <button onClick={onToggle} className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-400">
+        {/* Tombol tutup khusus mobile */}
+        <button onClick={onToggle} className="text-emerald-400 hover:text-white transition-colors lg:hidden">
+          <i className="fa-solid fa-xmark text-lg"></i>
+        </button>
+        {/* Tombol toggle desktop */}
+        <button onClick={onToggle} className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-400 hidden lg:block">
           <i className="fa-solid fa-chevron-left"></i>
         </button>
       </div>
       
       <nav className="flex-1 px-4 py-2 space-y-1 overflow-y-auto custom-scrollbar">
-        {/* Admin Section - Restored */}
+        {/* Admin Section */}
         {authority === 'ADMIN' && (
           <div className="mb-6 p-4 rounded-2xl bg-rose-500/5 border border-rose-500/10">
             <p className="text-[8px] font-black text-rose-500 uppercase tracking-[0.3em] mb-3 ml-2">Authority Node</p>
@@ -124,7 +139,7 @@ export const Sidebar: React.FC<SidebarProps> = (props) => {
           </div>
         )}
 
-        {/* Brokers Navigation - Dynamic Standard */}
+        {/* Brokers Navigation */}
         {BROKERS.map(broker => (
           <div key={broker.id} className="mb-2">
             <button 
@@ -156,15 +171,18 @@ export const Sidebar: React.FC<SidebarProps> = (props) => {
         ))}
       </nav>
 
-      <div className="p-6 border-t border-emerald-500/10 text-[8px] font-bold uppercase text-center">
-        {serverLinked ? (
-          <div className="flex items-center justify-center gap-2 text-emerald-400">
-            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
-            Node established
-          </div>
-        ) : (
-          <span className="text-rose-500">Master Offline</span>
-        )}
+      <div className="p-6 border-t border-emerald-500/10 text-[8px] font-bold uppercase text-center bg-slate-950/50">
+        <div className="flex flex-col items-center gap-1">
+           <div className="flex items-center gap-2 text-emerald-400">
+             <i className="fa-solid fa-shield-halved"></i>
+             <span>SACRED PROTOCOL</span>
+           </div>
+           {serverLinked ? (
+             <span className="text-emerald-500 animate-pulse tracking-widest">● ONLINE</span>
+           ) : (
+             <span className="text-slate-600 tracking-widest">STANDBY</span>
+           )}
+        </div>
       </div>
     </aside>
   );

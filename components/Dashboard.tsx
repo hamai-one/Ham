@@ -7,27 +7,75 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ state }) => {
-  const { balances, activeBrain, serverStatus, transactions, selectedCurrency } = state;
+  const { balances, activeBrain, serverStatus, transactions, selectedCurrency, activeSource, tradingMode } = state;
 
-  const totalPnL = transactions.reduce((acc, tx) => acc + (tx.pnl || 0), 0);
-  const winRate = transactions.length > 0 
-    ? (transactions.filter(tx => (tx.pnl || 0) > 0).length / transactions.length * 100).toFixed(1) 
+  const sourceTransactions = transactions.filter(t => t.source === activeSource);
+  const totalPnL = sourceTransactions.reduce((acc, tx) => acc + (tx.pnl || 0), 0);
+  const winRate = sourceTransactions.length > 0 
+    ? (sourceTransactions.filter(tx => (tx.pnl || 0) > 0).length / sourceTransactions.length * 100).toFixed(1) 
     : '0';
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number | undefined) => {
+    if (amount === undefined || amount === null || isNaN(amount)) return `${selectedCurrency.symbol}0.00`;
     return `${selectedCurrency.symbol}${(amount * selectedCurrency.rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
+
+  const getActiveRealBalance = () => {
+    if (activeSource === 'binance') return balances.real;
+    return (balances as any)[activeSource] || 0;
+  };
+
+  const activeBalanceVal = getActiveRealBalance();
+
+  // Helper untuk Icon Broker - DISINKRONISASI LENGKAP DENGAN SIDEBAR
+  const getBrokerIcon = (source: string) => {
+      const map: any = {
+          binance: 'fa-brands fa-bitcoin',
+          fbs: 'fa-solid fa-chart-line',
+          exness: 'fa-solid fa-crown',
+          xm: 'fa-solid fa-shield-halved',
+          ic_markets: 'fa-solid fa-bolt',
+          hfm: 'fa-solid fa-fire',
+          pepperstone: 'fa-solid fa-pepper-hot',
+          ig_group: 'fa-solid fa-building-columns',
+          plus500: 'fa-solid fa-plus',
+          octafx: 'fa-solid fa-circle-nodes',
+          ibkr: 'fa-solid fa-building'
+      };
+      return map[source] || 'fa-solid fa-server';
+  };
+
+  // Helper untuk Warna Broker (Untuk efek visual dashboard)
+  // FIXED: Color Mapping Standardized (Binance=Yellow, Exness=Amber)
+  const getBrokerColor = (source: string) => {
+      const map: any = {
+          binance: 'yellow',
+          fbs: 'blue',
+          exness: 'amber',
+          xm: 'red',
+          ic_markets: 'emerald',
+          hfm: 'orange',
+          pepperstone: 'rose',
+          ig_group: 'indigo',
+          plus500: 'sky',
+          octafx: 'teal',
+          ibkr: 'violet'
+      };
+      return map[source] || 'emerald';
+  };
+
+  const brokerColor = getBrokerColor(activeSource);
 
   return (
     <div className="space-y-8 animate-fadeIn pb-20">
       <header>
         <h2 className="text-4xl font-orbitron font-black gradient-text uppercase tracking-tighter">Master Node Overview</h2>
-        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.4em] mt-2">Real-time Neural Performance Monitoring</p>
+        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.4em] mt-2">Sacred Protocol v16.9 Active</p>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* Simulation Balance */}
-        <div className="quantum-card p-6 rounded-[2.5rem] glass border-emerald-500/20 bg-emerald-500/[0.02]">
+        <div className={`quantum-card p-6 rounded-[2.5rem] glass border-emerald-500/20 bg-emerald-500/[0.02] transition-all ${tradingMode === 'simulation' ? 'shadow-[0_0_30px_rgba(16,185,129,0.1)] scale-[1.02]' : 'opacity-80'}`}>
            <div className="flex justify-between items-start mb-4">
               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Simulation Equity</p>
               <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-black">TESTNET</span>
@@ -39,16 +87,19 @@ const Dashboard: React.FC<DashboardProps> = ({ state }) => {
            </div>
         </div>
 
-        {/* Real Balance */}
-        <div className="quantum-card p-6 rounded-[2.5rem] glass border-amber-500/20 bg-amber-500/[0.02]">
+        {/* Real Balance - DYNAMIC BROKER THEME */}
+        <div className={`quantum-card p-6 rounded-[2.5rem] glass border-${brokerColor}-500/20 bg-${brokerColor}-500/[0.02] transition-all ${tradingMode === 'real' ? `shadow-[0_0_30px_rgba(var(--color-${brokerColor}-500),0.1)] scale-[1.02]` : 'opacity-80'}`}>
            <div className="flex justify-between items-start mb-4">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Real Node Equity</p>
-              <span className="text-[8px] bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 font-black">MAINNET</span>
+              <div className="flex items-center gap-2">
+                 <i className={`${getBrokerIcon(activeSource)} text-${brokerColor}-500`}></i>
+                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Real Equity ({activeSource.replace('_', ' ').toUpperCase()})</p>
+              </div>
+              <span className={`text-[8px] bg-${brokerColor}-500/10 text-${brokerColor}-500 px-2 py-0.5 rounded border border-${brokerColor}-500/20 font-black`}>MAINNET</span>
            </div>
-           <h3 className="text-3xl font-mono font-black text-amber-500">{formatCurrency(balances.real)}</h3>
-           <div className="mt-4 flex items-center gap-2 text-amber-500 text-[10px] font-bold">
+           <h3 className={`text-3xl font-mono font-black text-${brokerColor}-500`}>{formatCurrency(activeBalanceVal)}</h3>
+           <div className={`mt-4 flex items-center gap-2 text-${brokerColor}-500 text-[10px] font-bold`}>
               <i className="fa-solid fa-vault"></i>
-              <span>Secured in Wealth Vault</span>
+              <span>Secured in {activeSource === 'binance' ? 'Exchange' : 'Broker'} Vault</span>
            </div>
         </div>
 
@@ -66,30 +117,80 @@ const Dashboard: React.FC<DashboardProps> = ({ state }) => {
            <h3 className="text-2xl font-mono font-black text-white">{serverStatus.latency}ms / <span className="text-slate-500 text-sm">{serverStatus.uptime.split(' ')[0]}</span></h3>
            <div className="mt-4 flex items-center gap-2 text-emerald-500 text-[10px] font-bold">
               <i className="fa-solid fa-circle-check"></i>
-              <span>Accuracy: {winRate}%</span>
+              <span>{activeSource.replace('_', ' ').toUpperCase()} Win Rate: {winRate}%</span>
            </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-         <div className="lg:col-span-2 quantum-card p-10 rounded-[3rem] glass border-white/5 min-h-[400px] flex flex-col">
-            <h4 className="font-orbitron font-black text-sm text-white uppercase tracking-widest mb-10 flex items-center justify-between">
-               <span>Institutional Liquidity Map</span>
-               <span className="text-[9px] text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">LIVE SCANNING</span>
-            </h4>
-            <div className="flex-1 flex items-center justify-center border border-dashed border-white/10 rounded-3xl bg-slate-950/30">
-               <div className="text-center">
-                  <i className="fa-solid fa-radar text-4xl text-slate-800 mb-4 animate-pulse"></i>
-                  <p className="text-slate-600 font-black text-[10px] uppercase tracking-widest">Aggregating Order Flow Data from Global Nodes...</p>
+         {/* 3D SACRED BRIDGE VISUALIZER */}
+         <div className="lg:col-span-2 quantum-card p-0 rounded-[3rem] glass border-white/5 min-h-[400px] relative overflow-hidden group">
+            <div className="absolute inset-0 bg-[#020617]">
+               {/* Grid Background */}
+               <div className="absolute inset-0 bg-[linear-gradient(rgba(45,212,191,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(45,212,191,0.03)_1px,transparent_1px)] bg-[size:40px_40px] perspective-[500px] transform rotateX(20deg)"></div>
+               
+               {/* Central Tunnel */}
+               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full flex items-center justify-center pointer-events-none">
+                   <div className="relative w-[80%] h-[120px] bg-gradient-to-r from-transparent via-emerald-500/10 to-transparent blur-xl"></div>
+                   
+                   {/* Data Particles Flowing Left to Right */}
+                   <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+                      {[...Array(5)].map((_, i) => (
+                        <div 
+                           key={i}
+                           className="absolute h-[2px] w-[100px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent rounded-full animate-scan"
+                           style={{ 
+                              left: '-10%', 
+                              top: `${40 + (i * 5)}%`,
+                              animationDuration: `${2 + Math.random()}s`,
+                              animationDelay: `${Math.random()}s`,
+                              opacity: 0.7
+                           }}
+                        ></div>
+                      ))}
+                   </div>
+               </div>
+
+               {/* Left Node (Aeterna) */}
+               <div className="absolute left-10 top-1/2 -translate-y-1/2 text-center z-10">
+                   <div className="w-20 h-20 rounded-2xl bg-[#0f172a] border border-emerald-500/30 flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.2)] mb-4 relative">
+                       <i className="fa-solid fa-robot text-3xl text-emerald-400"></i>
+                       <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full animate-ping"></div>
+                   </div>
+                   <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Aeterna Node</h4>
+                   <p className="text-[8px] text-emerald-500 font-mono">Sacred Protocol</p>
+               </div>
+
+               {/* Right Node (Binance/Broker) - DYNAMIC BROKER DISPLAY */}
+               <div className="absolute right-10 top-1/2 -translate-y-1/2 text-center z-10">
+                   <div className={`w-20 h-20 rounded-2xl bg-[#0f172a] border border-${brokerColor}-500/30 flex items-center justify-center shadow-[0_0_30px_rgba(var(--color-${brokerColor}-500),0.2)] mb-4 relative`}>
+                       <i className={`${getBrokerIcon(activeSource)} text-3xl text-${brokerColor}-400`}></i>
+                       <div className={`absolute -bottom-1 -left-1 w-3 h-3 bg-${brokerColor}-500 rounded-full animate-ping`}></div>
+                   </div>
+                   <h4 className="text-[10px] font-black text-white uppercase tracking-widest">{activeSource.toUpperCase()} API</h4>
+                   <p className={`text-[8px] text-${brokerColor}-500 font-mono`}>Encrypted Link</p>
+               </div>
+
+               {/* Connection Line with Pulse */}
+               <div className={`absolute top-1/2 left-[100px] right-[100px] h-[1px] bg-gradient-to-r from-emerald-500/20 via-white/20 to-${brokerColor}-500/20 -translate-y-1/2`}></div>
+            </div>
+            
+            {/* Overlay Info */}
+            <div className="absolute bottom-6 left-10 z-20">
+               <div className="flex items-center gap-2">
+                  <i className="fa-solid fa-lock text-emerald-500 text-[10px]"></i>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">E2E ENCRYPTION: <span className="text-white">VERIFIED</span></span>
                </div>
             </div>
          </div>
+
+         {/* System Health Matrix */}
          <div className="quantum-card p-10 rounded-[3rem] glass border-white/5 space-y-8">
             <h4 className="font-orbitron font-black text-sm text-white uppercase tracking-widest border-b border-white/5 pb-6">System Health Matrix</h4>
             <div className="space-y-6">
                {[
                  { label: 'DeepSeek R1 Processing', value: 88, color: 'bg-indigo-500' },
-                 { label: 'Binance API Uplink', value: 99, color: 'bg-emerald-500' },
+                 { label: `Sacred Uplink (${activeSource.toUpperCase()})`, value: 99, color: `bg-${brokerColor}-500` },
                  { label: 'Risk Safeguard Buffer', value: 95, color: 'bg-amber-500' },
                  { label: 'Creative Synth Engine', value: 42, color: 'bg-purple-500' }
                ].map((h, i) => (

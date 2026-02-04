@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CryptoJS from 'crypto-js';
 import { LicenseUser } from '../types';
+import { FirebaseService } from '../services/firebase';
 
 interface DatabaseUserProps {
   database: LicenseUser[];
@@ -48,13 +49,18 @@ const DatabaseUser: React.FC<DatabaseUserProps> = ({ database, onUpdateDatabase 
 
   const syncToCloud = async (newDb: LicenseUser[]) => {
     setIsSyncing(true);
-    // Simulasi Pushing ke API / Cloud DB
-    console.log("[Neural Sync] Pushing update to global database node...");
-    await new Promise(r => setTimeout(r, 1200));
+    console.log("[Neural Sync] Pushing update to Firebase Cloud Node...");
     
-    // Simpan ke local storage (yang merepresentasikan node ini)
-    localStorage.setItem('AETERNA_GLOBAL_SYNC_DB', JSON.stringify(newDb));
+    // Update State Lokal
     onUpdateDatabase(newDb);
+    localStorage.setItem('AETERNA_GLOBAL_SYNC_DB', JSON.stringify(newDb));
+
+    // Push ke Firebase
+    const success = await FirebaseService.saveLicenses(newDb);
+    if (!success) {
+        console.warn("Firebase Sync Failed - Falling back to local storage");
+    }
+    
     setIsSyncing(false);
   };
 
@@ -106,8 +112,11 @@ const DatabaseUser: React.FC<DatabaseUserProps> = ({ database, onUpdateDatabase 
     setRows(newRows);
     
     const validRows = newRows.filter(r => r.name.trim() !== '' && r.keylis.trim() !== '');
-    lastUpdateRef.current = JSON.stringify(validRows);
-    syncToCloud(validRows);
+    // Cek apakah ada perubahan signifikan sebelum sync agar tidak spamming API
+    if (JSON.stringify(validRows) !== lastUpdateRef.current) {
+        lastUpdateRef.current = JSON.stringify(validRows);
+        syncToCloud(validRows);
+    }
   };
 
   const copyToClipboard = (text: string) => {
@@ -118,8 +127,8 @@ const DatabaseUser: React.FC<DatabaseUserProps> = ({ database, onUpdateDatabase 
 
   if (!isAuthenticated) {
     return (
-      <div className="h-[80vh] flex items-center justify-center animate-fadeIn">
-         <div className="quantum-card p-12 rounded-[3rem] border-amber-500/30 bg-slate-900/90 backdrop-blur-xl max-w-md w-full text-center space-y-6">
+      <div className="h-[80vh] flex items-center justify-center animate-fadeIn px-4">
+         <div className="quantum-card p-8 md:p-12 rounded-[2rem] md:rounded-[3rem] border-amber-500/30 bg-slate-900/90 backdrop-blur-xl max-w-md w-full text-center space-y-6">
             <div className="w-20 h-20 mx-auto rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 text-3xl shadow-[0_0_30px_rgba(245,158,11,0.2)]">
                <i className="fa-solid fa-database animate-pulse"></i>
             </div>
@@ -134,34 +143,34 @@ const DatabaseUser: React.FC<DatabaseUserProps> = ({ database, onUpdateDatabase 
   }
 
   return (
-    <div className="space-y-6 animate-fadeIn pb-32">
+    <div className="space-y-6 animate-fadeIn pb-32 w-full max-w-full overflow-hidden">
        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-             <h2 className="text-3xl font-orbitron font-bold gradient-text uppercase tracking-tighter">Neural License Matrix</h2>
-             <p className="text-xs text-slate-500 font-black uppercase tracking-widest mt-1">Global Encrypted Registry</p>
+             <h2 className="text-2xl md:text-3xl font-orbitron font-bold gradient-text uppercase tracking-tighter">Neural License Matrix</h2>
+             <p className="text-xs text-slate-500 font-black uppercase tracking-widest mt-1">Global Firebase Registry</p>
           </div>
           <div className="flex gap-4">
               <div className={`px-4 py-2 border rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${isSyncing ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
-                 <i className={`fa-solid ${isSyncing ? 'fa-sync animate-spin' : 'fa-cloud-check'}`}></i> 
-                 {isSyncing ? 'Syncing Global Node...' : 'Neural Sync Active'}
+                 <i className={`fa-solid ${isSyncing ? 'fa-sync animate-spin' : 'fa-cloud'}`}></i> 
+                 {isSyncing ? 'Pushing to Cloud...' : 'Firebase Connected'}
               </div>
-              <div className="px-4 py-2 bg-rose-600/10 border border-rose-600/30 rounded-xl text-rose-500 text-xs font-black uppercase">
+              <div className="hidden md:block px-4 py-2 bg-rose-600/10 border border-rose-600/30 rounded-xl text-rose-500 text-xs font-black uppercase">
                  MASTER-ADMIN
               </div>
           </div>
        </header>
 
-       <div className="quantum-card p-4 rounded-[2.5rem] border-white/10 glass overflow-hidden">
+       <div className="quantum-card p-1 md:p-4 rounded-[1.5rem] md:rounded-[2.5rem] border-white/10 glass overflow-hidden">
           <div className="overflow-x-auto custom-scrollbar">
-             <table className="w-full text-left border-collapse">
+             <table className="w-full text-left border-collapse min-w-[800px]">
                 <thead>
                    <tr className="bg-slate-950/50 text-slate-400 text-[10px] font-black uppercase tracking-widest">
                       <th className="p-4 w-12 rounded-l-xl">#</th>
                       <th className="p-4 w-40">Client Name</th>
-                      <th className="p-4 w-40">Authority</th>
-                      <th className="p-4 w-40">Keylis</th>
+                      <th className="p-4 w-32">Authority</th>
+                      <th className="p-4 w-32">Keylis</th>
                       <th className="p-4">Quantum License Key</th>
-                      <th className="p-4 w-32">Term</th>
+                      <th className="p-4 w-28">Term</th>
                       <th className="p-4 w-32 rounded-r-xl text-right">Expiry</th>
                    </tr>
                 </thead>
@@ -184,8 +193,8 @@ const DatabaseUser: React.FC<DatabaseUserProps> = ({ database, onUpdateDatabase 
                                onChange={(e) => handleRowChange(index, 'authority', e.target.value as any)}
                                className={`w-full bg-slate-950/80 border border-white/10 rounded-lg px-2 py-2 outline-none focus:border-emerald-500 font-black text-[9px] uppercase ${row.authority === 'ADMIN' ? 'text-rose-500' : 'text-emerald-400'}`}
                             >
-                               <option value="USER">USER NODE</option>
-                               <option value="ADMIN">ADMIN CORE</option>
+                               <option value="USER">USER</option>
+                               <option value="ADMIN">ADMIN</option>
                             </select>
                          </td>
                          <td className="p-4">
@@ -193,7 +202,7 @@ const DatabaseUser: React.FC<DatabaseUserProps> = ({ database, onUpdateDatabase 
                               type="text" 
                               value={row.keylis} 
                               onChange={(e) => handleRowChange(index, 'keylis', e.target.value)} 
-                              placeholder="Keylis"
+                              placeholder="Key"
                               className="w-full bg-slate-950/50 border border-white/5 rounded-lg px-3 py-2 outline-none focus:border-purple-500 text-amber-400 placeholder-slate-800 transition-all"
                             />
                          </td>
@@ -216,7 +225,7 @@ const DatabaseUser: React.FC<DatabaseUserProps> = ({ database, onUpdateDatabase 
                             <select 
                                value={row.duration} 
                                onChange={(e) => handleRowChange(index, 'duration', e.target.value as any)}
-                               className="bg-slate-950/80 border border-white/10 rounded-lg px-2 py-1.5 text-white outline-none focus:border-teal-500"
+                               className="bg-slate-950/80 border border-white/10 rounded-lg px-2 py-1.5 text-white outline-none focus:border-teal-500 w-full"
                             >
                                <option value="1">1D</option>
                                <option value="7">7D</option>

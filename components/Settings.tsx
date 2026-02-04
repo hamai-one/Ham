@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { AppState, TradingSource, MarketCategory } from '../types.ts';
 
@@ -81,23 +82,25 @@ export const Settings: React.FC<SettingsProps> = ({ state, onUpdateState }) => {
   };
 
   return (
-    <div className="space-y-8 animate-fadeIn pb-32">
+    <div className="space-y-8 animate-fadeIn pb-32 w-full max-w-full overflow-hidden">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h2 className="text-4xl font-orbitron font-black gradient-text uppercase tracking-tighter">Node Configuration</h2>
+          <h2 className="text-3xl md:text-4xl font-orbitron font-black gradient-text uppercase tracking-tighter">Node Configuration</h2>
           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.4em] mt-2">Sacred Protocol v16.9 Synchronization</p>
         </div>
-        <div className="flex bg-slate-950/80 rounded-2xl p-1.5 border border-white/5 shadow-inner">
-          <button onClick={() => setActiveTab('brokers')} className={`px-6 py-2.5 text-[10px] font-black uppercase rounded-xl transition-all ${activeTab === 'brokers' ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>Broker Node</button>
-          <button onClick={() => setActiveTab('risk')} className={`px-6 py-2.5 text-[10px] font-black uppercase rounded-xl transition-all ${activeTab === 'risk' ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>Risk Engine</button>
-          <button onClick={() => setActiveTab('general')} className={`px-6 py-2.5 text-[10px] font-black uppercase rounded-xl transition-all ${activeTab === 'general' ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>System</button>
+        <div className="w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
+          <div className="flex bg-slate-950/80 rounded-2xl p-1.5 border border-white/5 shadow-inner whitespace-nowrap min-w-max">
+            <button onClick={() => setActiveTab('brokers')} className={`px-6 py-2.5 text-[10px] font-black uppercase rounded-xl transition-all ${activeTab === 'brokers' ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>Broker Node</button>
+            <button onClick={() => setActiveTab('risk')} className={`px-6 py-2.5 text-[10px] font-black uppercase rounded-xl transition-all ${activeTab === 'risk' ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>Risk Engine</button>
+            <button onClick={() => setActiveTab('general')} className={`px-6 py-2.5 text-[10px] font-black uppercase rounded-xl transition-all ${activeTab === 'general' ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>System</button>
+          </div>
         </div>
       </header>
 
       {activeTab === 'brokers' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-          {/* List Broker */}
-          <div className="xl:col-span-4 space-y-3 overflow-y-auto max-h-[70vh] custom-scrollbar pr-2">
+          {/* List Broker - Horizontal Scroll di Mobile */}
+          <div className="xl:col-span-4 space-y-3 overflow-y-auto max-h-[300px] xl:max-h-[70vh] custom-scrollbar pr-2">
             {(Object.entries(BROKER_DETAILS) as [TradingSource, any][]).map(([id, info]) => {
               const isLinked = (state.nodeKeys as any)[id]?.isAuthorized;
               return (
@@ -123,7 +126,7 @@ export const Settings: React.FC<SettingsProps> = ({ state, onUpdateState }) => {
 
           {/* Configuration Panel */}
           <div className="xl:col-span-8 space-y-8 animate-slideUp">
-            <div className={`quantum-card p-10 rounded-[3.5rem] glass border-${brokerInfo.color}-500/20 shadow-2xl relative overflow-hidden`}>
+            <div className={`quantum-card p-6 md:p-10 rounded-[2rem] md:rounded-[3.5rem] glass border-${brokerInfo.color}-500/20 shadow-2xl relative overflow-hidden`}>
               <div className="absolute top-0 right-0 p-8 opacity-10">
                  <i className={`${brokerInfo.icon} text-[120px] text-white`}></i>
               </div>
@@ -225,7 +228,7 @@ export const Settings: React.FC<SettingsProps> = ({ state, onUpdateState }) => {
       )}
 
       {activeTab === 'risk' && (
-        <div className="quantum-card p-10 rounded-[3rem] glass border-white/5 animate-slideUp">
+        <div className="quantum-card p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] glass border-white/5 animate-slideUp">
            <h4 className="font-orbitron font-black text-sm text-white uppercase tracking-widest mb-10">Neural Risk Guard (Active Nodes)</h4>
            <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
               <div className="space-y-8">
